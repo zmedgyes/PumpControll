@@ -4,49 +4,33 @@
  */
 
 #include <SoftwareSerial.h>
-#include <EEPROM.h>
 
 SoftwareSerial loraSerial(10, 11);
 
 String str;
-int id;
-int idAddress = 0;
-String bootCmd = "";
+String msgBody;
+int i=0;
 
 void setup() {
   //output LED pin
   pinMode(13, OUTPUT);
   led_off();
+  
+  // Open serial communications and wait for port to open:
+  
+  Serial.begin(57600);
 
-  //Radio Reset
+   //Radio Reset
   pinMode(12, OUTPUT);
   digitalWrite(12, 0);
   delay(100);
   digitalWrite(12, 1);
   delay(100);
   
-  // Open serial communications and wait for port to open:
-  
-  Serial.begin(57600);
-  Serial.println("connected");
-  Serial.setTimeout(5000);
-  Serial.println("BootCommand for 5sec");
-  bootCmd = Serial.readStringUntil('\n');
-  if(bootCmd == ""){
-    Serial.println("BootCommand ended");
-  }
-  else{
-     if ( bootCmd.indexOf("setid") == 0 ){
-      id = bootCmd.substring(6).toInt();
-      EEPROM.put(idAddress,id);
-     }
-  }
-  EEPROM.get(idAddress,id);
-  Serial.println(id);
-  
   loraSerial.begin(9600);
   loraSerial.setTimeout(1000);
   lora_autobaud();
+  
   led_on();
   delay(1000);
   led_off();
@@ -113,9 +97,9 @@ void setup() {
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
-  /*loraSerial.println("radio set wdt 60000"); //disable for continuous reception
+  loraSerial.println("radio set wdt 60000"); //disable for continuous reception
   str = loraSerial.readStringUntil('\n');
-  Serial.println(str);*/
+  Serial.println(str);
   
   loraSerial.println("radio set sync 12");
   str = loraSerial.readStringUntil('\n');
@@ -124,37 +108,24 @@ void setup() {
   loraSerial.println("radio set bw 125");
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
+
+  Serial.println("starting loop");
 }
 
 void loop() {
-  Serial.println("waiting for a message");
-  loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
-  
+  led_on();
+  msgBody = String(i, HEX);
+  if(msgBody.length()%2){
+    msgBody= '0'+msgBody;
+  }
+  loraSerial.println("radio tx 34"+msgBody);
   str = loraSerial.readStringUntil('\n');
-  if ( str.indexOf("ok") == 0 )
-  {
-    str = String("");
-    while(str=="")
-    {
-      str = loraSerial.readStringUntil('\n');
-    }
-    if ( str.indexOf("radio_rx") == 0 )
-    {
-      Serial.println(str);
-      processMsg(str.substring(10));
-      toggle_led();
-    }
-    else
-    {
-      Serial.println("Received nothing");
-    }
-  }
-  else
-  {
-    Serial.println("radio not going into receive mode");
-    delay(1000);
-  }
-  delay(1000);
+  Serial.println(str);
+  str = loraSerial.readStringUntil('\n');
+  Serial.println(str);
+  led_off();
+  i++;
+  delay(200);
 }
 
 void lora_autobaud()
@@ -184,11 +155,6 @@ int wait_for_ok()
   else return 0;
 }
 
-void toggle_led()
-{
-  digitalWrite(13, !digitalRead(13));
-}
-
 void led_on()
 {
   digitalWrite(13, 1);
@@ -197,14 +163,4 @@ void led_on()
 void led_off()
 {
   digitalWrite(13, 0);
-}
-void processMsg(String msg){
-  int msgId = msg.substring(0,2).toInt();
-  String msgBody = msg.substring(2);
-  if(msgId == id){
-    Serial.println("own cmd:"+msgBody);
-  }
-  else{
-    Serial.println("foreign cmd to:"+id);
-  }
 }
