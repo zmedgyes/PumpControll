@@ -113,9 +113,9 @@ void setup() {
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
-  /*loraSerial.println("radio set wdt 60000"); //disable for continuous reception
+  loraSerial.println("radio set wdt 60000"); //disable for continuous reception
   str = loraSerial.readStringUntil('\n');
-  Serial.println(str);*/
+  Serial.println(str);
   
   loraSerial.println("radio set sync 12");
   str = loraSerial.readStringUntil('\n');
@@ -154,7 +154,6 @@ void loop() {
     Serial.println("radio not going into receive mode");
     delay(1000);
   }
-  delay(1000);
 }
 
 void lora_autobaud()
