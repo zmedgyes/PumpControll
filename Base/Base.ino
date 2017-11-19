@@ -8,6 +8,7 @@
 SoftwareSerial loraSerial(10, 11);
 
 String str;
+String inCmd;
 String msgBody;
 int i=0;
 
@@ -19,6 +20,7 @@ void setup() {
   // Open serial communications and wait for port to open:
   
   Serial.begin(57600);
+  Serial.setTimeout(1000);
 
    //Radio Reset
   pinMode(12, OUTPUT);
@@ -113,7 +115,37 @@ void setup() {
 }
 
 void loop() {
-  led_on();
+   Serial.println("check incoming buffer");
+   inCmd = Serial.readStringUntil('\n');
+   Serial.println("cmd: "+inCmd);
+   Serial.println("waiting for a message");
+  loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
+  
+  str = loraSerial.readStringUntil('\n');
+  if ( str.indexOf("ok") == 0 )
+  {
+    str = String("");
+    while(str=="")
+    {
+      str = loraSerial.readStringUntil('\n');
+    }
+    if ( str.indexOf("radio_rx") == 0 )
+    {
+      Serial.println(str);
+      //processMsg(str.substring(10));
+      //toggle_led();
+    }
+    else
+    {
+      Serial.println("Received nothing");
+    }
+  }
+  else
+  {
+    Serial.println("radio not going into receive mode");
+    delay(1000);
+  }
+  /*led_on();
   msgBody = String(i, HEX);
   if(msgBody.length()%2){
     msgBody= '0'+msgBody;
@@ -125,7 +157,7 @@ void loop() {
   Serial.println(str);
   led_off();
   i++;
-  delay(200);
+  delay(200);*/
 }
 
 void lora_autobaud()

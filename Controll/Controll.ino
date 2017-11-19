@@ -13,17 +13,17 @@ int id;
 int idAddress = 0;
 String bootCmd = "";
 
+const int sensorIn = A0;
+const int measWindowSize = 1000;
+int mVperAmp = 66; // use 100 for 20A Module and 66 for 30A Module
+double Voltage = 0;
+double VRMS = 0;
+double AmpsRMS = 0;
+
 void setup() {
   //output LED pin
   pinMode(13, OUTPUT);
   led_off();
-
-  //Radio Reset
-  pinMode(12, OUTPUT);
-  digitalWrite(12, 0);
-  delay(100);
-  digitalWrite(12, 1);
-  delay(100);
   
   // Open serial communications and wait for port to open:
   
@@ -43,10 +43,19 @@ void setup() {
   }
   EEPROM.get(idAddress,id);
   Serial.println(id);
+
+  
+    //Radio Reset
+  pinMode(12, OUTPUT);
+  digitalWrite(12, 0);
+  delay(100);
+  digitalWrite(12, 1);
+  delay(100);
   
   loraSerial.begin(9600);
   loraSerial.setTimeout(1000);
   lora_autobaud();
+  
   led_on();
   delay(1000);
   led_off();
@@ -128,8 +137,14 @@ void setup() {
 
 void loop() {
   Serial.println("waiting for a message");
-  loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
+  //currentMeas
+  Voltage = getVPP(measWindowSize);
+  VRMS = (Voltage/2.0) *0.707; 
+  AmpsRMS = (VRMS * 1000)/mVperAmp;
+  sendMessage((char)0,(char)1,String((int)AmpsRMS,HEX));
   
+  loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
+            
   str = loraSerial.readStringUntil('\n');
   if ( str.indexOf("ok") == 0 )
   {
@@ -207,3 +222,40 @@ void processMsg(String msg){
     Serial.println("foreign cmd to:"+id);
   }
 }
+void sendMessage(char toId, char type, String hexContent){
+  String msgBody = toId + (char)id + type + hexContent;
+  Serial.println("Sndmsg: "+msgBody);
+  loraSerial.println("radio tx "+msgBody);
+  str = loraSerial.readStringUntil('\n');
+  Serial.println(str);
+  str = loraSerial.readStringUntil('\n');
+  Serial.println(str);
+}
+float getVPP(int windowSize)
+{
+  float result;
+  
+  int readValue;             //value read from the sensor
+  int maxValue = 0;          // store max value here
+  int minValue = 1024;          // store min value here
+   uint32_t start_time = millis();
+   while((millis()-start_time) < windowSize)
+   {
+       readValue = analogRead(sensorIn);
+       // see if you have a new maxValue
+       if (readValue > maxValue) 
+       {
+           /*record the maximum sensor value*/
+           maxValue = readValue;
+       }
+       if (readValue < minValue) 
+       {
+           /*record the maximum sensor value*/
+           minValue = readValue;
+       }
+   }
+   // Subtract min from max
+   result = ((maxValue - minValue) * 5.0)/1024.0;
+      
+   return result;
+ }
