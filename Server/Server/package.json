@@ -1,0 +1,13 @@
+{
+  "name": "server",
+  "version": "0.0.0",
+  "description": "Server",
+  "main": "app.js",
+  "author": {
+    "name": "Zsolt"
+  },
+  "dependencies": {
+    "async": "^2.6.0",
+    "serialport": "^6.0.4"
+  }
+}
