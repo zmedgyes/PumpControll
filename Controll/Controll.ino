@@ -122,7 +122,8 @@ void setup() {
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
-  loraSerial.println("radio set wdt 60000"); //disable for continuous reception
+  //loraSerial.println("radio set wdt 60000"); //disable for continuous reception
+  loraSerial.println("radio set wdt 10000"); //disable for continuous reception
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
@@ -136,13 +137,15 @@ void setup() {
 }
 
 void loop() {
-  Serial.println("waiting for a message");
+  
   //currentMeas
   Voltage = getVPP(measWindowSize);
   VRMS = (Voltage/2.0) *0.707; 
   AmpsRMS = (VRMS * 1000)/mVperAmp;
-  sendMessage((char)0,(char)1,String((int)AmpsRMS,HEX));
+  //Serial.println(floatToHEXString(AmpsRMS));
+  sendMessage(0,2,floatToHEXString(AmpsRMS));
   
+  Serial.println("waiting for a message");
   loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
             
   str = loraSerial.readStringUntil('\n');
@@ -157,7 +160,6 @@ void loop() {
     {
       Serial.println(str);
       processMsg(str.substring(10));
-      toggle_led();
     }
     else
     {
@@ -213,17 +215,106 @@ void led_off()
   digitalWrite(13, 0);
 }
 void processMsg(String msg){
-  int msgId = msg.substring(0,2).toInt();
-  String msgBody = msg.substring(2);
-  if(msgId == id){
+  int targetId = msg.substring(0,2).toInt();
+  int fromId = msg.substring(2,4).toInt();
+  int msgType = msg.substring(4,6).toInt();
+  String msgBody = msg.substring(6);
+  if(targetId == id){
     Serial.println("own cmd:"+msgBody);
+    //test toggle led
+    if(msgType == 1){
+      Serial.println("toggle led");
+      toggle_led();
+      delay(500);
+      toggle_led();
+    }
   }
   else{
     Serial.println("foreign cmd to:"+id);
   }
 }
-void sendMessage(char toId, char type, String hexContent){
-  String msgBody = toId + (char)id + type + hexContent;
+String floatToHEXString(float f){
+  String ret = "";
+  byte bytes[4];
+
+  *((float *)bytes) = f;
+  ret += byteToHEXString(bytes[3]);
+  ret += byteToHEXString(bytes[2]);
+  ret += byteToHEXString(bytes[1]);
+  ret += byteToHEXString(bytes[0]);
+  return ret;
+}
+String byteToHEXString(byte b){
+  int upper = (int)((b & 0xF0) >> 4);
+  int lower = (int)(b & 0x0F);
+  return String(upper,HEX)+String(lower,HEX);
+}
+byte HEXStringToByte(String str){
+  char buf[] = {'0','0'};
+  str.toCharArray(buf,2);
+  return  (convertCharToHex(buf[0]) << 4)+convertCharToHex(buf[1]);
+}
+char convertCharToHex(char ch)
+{
+  char returnType;
+  switch(ch)
+  {
+    case '0':
+    returnType = 0;
+    break;
+    case  '1' :
+    returnType = 1;
+    break;
+    case  '2':
+    returnType = 2;
+    break;
+    case  '3':
+    returnType = 3;
+    break;
+    case  '4' :
+    returnType = 4;
+    break;
+    case  '5':
+    returnType = 5;
+    break;
+    case  '6':
+    returnType = 6;
+    break;
+    case  '7':
+    returnType = 7;
+    break;
+    case  '8':
+    returnType = 8;
+    break;
+    case  '9':
+    returnType = 9;
+    break;
+    case  'A':
+    returnType = 10;
+    break;
+    case  'B':
+    returnType = 11;
+    break;
+    case  'C':
+    returnType = 12;
+    break;
+    case  'D':
+    returnType = 13;
+    break;
+    case  'E':
+    returnType = 14;
+    break;
+    case  'F' :
+    returnType = 15;
+    break;
+    default:
+    returnType = 0;
+    break;
+  }
+  return returnType;
+}
+void sendMessage(byte toId, byte type, String hexContent){
+  String msgBody = byteToHEXString(toId) + byteToHEXString((byte)id) + byteToHEXString(type) + hexContent;
   Serial.println("Sndmsg: "+msgBody);
   loraSerial.println("radio tx "+msgBody);
   str = loraSerial.readStringUntil('\n');

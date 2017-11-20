@@ -11,6 +11,7 @@ String str;
 String inCmd;
 String msgBody;
 int i=0;
+int buffLen = 0;
 
 void setup() {
   //output LED pin
@@ -115,9 +116,15 @@ void setup() {
 }
 
 void loop() {
-   Serial.println("check incoming buffer");
+   Serial.println("getbufferlength");
    inCmd = Serial.readStringUntil('\n');
-   Serial.println("cmd: "+inCmd);
+   buffLen = inCmd.toInt();
+   for(i = 0; i<buffLen; i++){
+    Serial.println("getnext");
+    inCmd = Serial.readStringUntil('\n');
+    processServerMsg(inCmd);
+    Serial.println("cmd: "+inCmd);
+   }
    Serial.println("waiting for a message");
   loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
   
@@ -195,4 +202,16 @@ void led_on()
 void led_off()
 {
   digitalWrite(13, 0);
+}
+void processServerMsg(String msg){
+  if ( msg.indexOf("send") == 0 ){
+      sendRF(msg.substring(5));
+  }
+}
+void sendRF(String msg){
+  loraSerial.println("radio tx "+msg);
+  str = loraSerial.readStringUntil('\n');
+  Serial.println(str);
+  str = loraSerial.readStringUntil('\n');
+  Serial.println(str);
 }
