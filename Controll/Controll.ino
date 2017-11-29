@@ -1,3 +1,4 @@
+
 /*
  * Author: JP Meijers
  * 30 September 2016
@@ -5,12 +6,22 @@
 
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
+#include <AESLib.h>
+
+struct DeviceObject {
+  byte id;
+  byte deviceKey[16];
+  byte serverKey[16];
+  char passphrase[13];
+};
+
 
 SoftwareSerial loraSerial(10, 11);
 
 String str;
-int id;
-int idAddress = 0;
+DeviceObject dev;
+int token =0;
+int devObjAddress = 0;
 String bootCmd = "";
 
 const int sensorIn = A0;
@@ -37,13 +48,25 @@ void setup() {
   }
   else{
      if ( bootCmd.indexOf("setid") == 0 ){
-      id = bootCmd.substring(6).toInt();
-      EEPROM.put(idAddress,id);
+      dev.id = HEXStringToByte(bootCmd.substring(6));
+      EEPROM.put(devObjAddress,dev.id);
+     }
+     else if ( bootCmd.indexOf("init") == 0){
+      dev.id = HEXStringToByte(bootCmd.substring(5,7));
+      String dKeyString = bootCmd.substring(8,40);
+      String sKeyString = bootCmd.substring(41,73);
+      for(int i = 0; i< 16; i++){
+        dev.deviceKey[i]=HEXStringToByte(dKeyString.substring(i*2,i*2+2));
+        dev.serverKey[i]=HEXStringToByte(sKeyString.substring(i*2,i*2+2));
+      }
+      //+1 a stringlezáró miatt
+      bootCmd.substring(74,87).toCharArray(dev.passphrase,14);
+      EEPROM.put(devObjAddress, dev);
      }
   }
-  EEPROM.get(idAddress,id);
-  Serial.println(id);
-
+  EEPROM.get(devObjAddress,dev);
+  Serial.println(byteToHEXString(dev.id));
+  Serial.println(String(dev.passphrase));
   
     //Radio Reset
   pinMode(12, OUTPUT);
@@ -134,6 +157,12 @@ void setup() {
   loraSerial.println("radio set bw 125");
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
+
+  //send register
+  byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  String cmd = "registertest 01"+byteToHEXString(dev.id)+aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf));
+  Serial.println(cmd);
+  delay(1000);
 }
 
 void loop() {
@@ -143,14 +172,24 @@ void loop() {
   VRMS = (Voltage/2.0) *0.707; 
   AmpsRMS = (VRMS * 1000)/mVperAmp;
   //Serial.println(floatToHEXString(AmpsRMS));
-  sendMessage(0,2,floatToHEXString(AmpsRMS));
-  
+  //sendMessage(0,2,floatToHEXString(AmpsRMS));
+  byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  byte* pack = packCurrentData(0.5f,buf);
+  String ret ="";
+  String key = "";
+  for(int i =0; i<16; i++){
+    ret += byteToHEXString(pack[i]);
+    key += byteToHEXString(dev.serverKey[i]);
+  }
+  Serial.println(ret);
+  Serial.println(key);
+  Serial.println("aestest 01"+byteToHEXString(dev.id)+aesEncriptAndToHexString(dev.deviceKey,pack));
   Serial.println("waiting for a message");
   loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
             
   str = loraSerial.readStringUntil('\n');
-  if ( str.indexOf("ok") == 0 )
-  {
+  if ( str.indexOf("ok") == 0 ){
+  
     str = String("");
     while(str=="")
     {
@@ -215,11 +254,11 @@ void led_off()
   digitalWrite(13, 0);
 }
 void processMsg(String msg){
-  int targetId = msg.substring(0,2).toInt();
-  int fromId = msg.substring(2,4).toInt();
+  byte targetId = HEXStringToByte(msg.substring(0,2));
+  byte fromId = msg.substring(2,4).toInt();
   int msgType = msg.substring(4,6).toInt();
   String msgBody = msg.substring(6);
-  if(targetId == id){
+  if(targetId == dev.id){
     Serial.println("own cmd:"+msgBody);
     //test toggle led
     if(msgType == 1){
@@ -230,33 +269,57 @@ void processMsg(String msg){
     }
   }
   else{
-    Serial.println("foreign cmd to:"+id);
+    Serial.println("foreign cmd to:"+targetId);
   }
 }
-String floatToHEXString(float f){
-  String ret = "";
-  byte bytes[4];
 
-  *((float *)bytes) = f;
-  ret += byteToHEXString(bytes[3]);
-  ret += byteToHEXString(bytes[2]);
-  ret += byteToHEXString(bytes[1]);
-  ret += byteToHEXString(bytes[0]);
+String aesEncriptAndToHexString(byte* key, byte* data){
+  String ret ="";
+  aes128_enc_single(key, data);
+  for(int i =0; i<16; i++){
+    ret += byteToHEXString(data[i]);
+  }
   return ret;
 }
+
+byte* aesDecryptAndToByteArray(byte* key, String data,byte* ret){
+  for(int i = 0; i < 16; i++){
+    ret[i] = HEXStringToByte(data.substring(i*2,i*2+2));
+  }
+  aes128_dec_single(key, ret);
+  return ret;
+}
+
+byte* packRegisterData(byte* ret){
+  ret[0] = 0;
+  for(int i = 0; i < 13; i++){
+    ret[i+1] = dev.passphrase[i];
+  }
+  return ret;
+}
+byte* packHearthBeat(byte* ret){
+  ret[0] = 1;
+   *((int *) &(ret[1])) = token;
+  return ret;
+}
+byte* packCurrentData(float data, byte* ret){
+  ret[0] = 2;
+  *((int *) &(ret[1])) = token;
+  *((float *) &(ret[3])) = data;
+  return ret;
+}
+
 String byteToHEXString(byte b){
   int upper = (int)((b & 0xF0) >> 4);
   int lower = (int)(b & 0x0F);
   return String(upper,HEX)+String(lower,HEX);
 }
 byte HEXStringToByte(String str){
-  char buf[] = {'0','0'};
-  str.toCharArray(buf,2);
-  return  (convertCharToHex(buf[0]) << 4)+convertCharToHex(buf[1]);
+  return (convertCharToHex(str.charAt(0)) << 4)+convertCharToHex(str.charAt(1));
 }
-char convertCharToHex(char ch)
+byte convertCharToHex(char ch)
 {
-  char returnType;
+  byte returnType;
   switch(ch)
   {
     case '0':
@@ -307,14 +370,32 @@ char convertCharToHex(char ch)
     case  'F' :
     returnType = 15;
     break;
+    case  'a':
+    returnType = 10;
+    break;
+    case  'b':
+    returnType = 11;
+    break;
+    case  'c':
+    returnType = 12;
+    break;
+    case  'd':
+    returnType = 13;
+    break;
+    case  'e':
+    returnType = 14;
+    break;
+    case  'f' :
+    returnType = 15;
+    break;
     default:
     returnType = 0;
     break;
   }
   return returnType;
 }
-void sendMessage(byte toId, byte type, String hexContent){
-  String msgBody = byteToHEXString(toId) + byteToHEXString((byte)id) + byteToHEXString(type) + hexContent;
+void sendMessage(byte toId, String hexContent){
+  String msgBody = byteToHEXString(toId) + byteToHEXString(dev.id) + hexContent;
   Serial.println("Sndmsg: "+msgBody);
   loraSerial.println("radio tx "+msgBody);
   str = loraSerial.readStringUntil('\n');
