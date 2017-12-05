@@ -49,3 +49,12 @@ Temporary Items
 node_modules/
 *.njsproj
 .suo
+
+#extjs
+ext/
+.sencha/
+build/
+
+#vs2017
+obj/
+bin/

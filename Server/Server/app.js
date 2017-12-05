@@ -1,195 +1,82 @@
-var async = require('async');
-var SerialPort = require('serialport');
-const Readline = SerialPort.parsers.Readline;
-var aesjs = require('aes-js');
-const crypto = require('crypto');
+var deviceControl = require('./deviceControl.js')
+var database = require('./database.js')
+var async = require('async')
 
-var port;
-var serialport;
-var cmdBuffer = ["send 060001"]
+var express = require('express')
+var bodyParser = require('body-parser');
+var app = express()
+var port = 3000
 
+app.use(express.static('public'))
 
-var key_128 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+app.get('/message', (req, res) => {
+    database.Message.find(req.query, (err, data) => {
+        res.setHeader('Content-Type', 'application/json')
+        if (err) {
+            res.write(JSON.stringify({ success: false, error: err }))
 
-var serverPsw = "server";
-var serverCode = 1;
-var serverKey;
-
-var initMode = false;
-var deviceCode = 33;
-var devices = {}
-
-
-var initServer = (callback) => {
-    createKeyFromPassphrase(1, "server", (err, key) => {
-        if (err) { callback(err) }
-        else {
-            serverKey = key;
-            callback();
         }
-        console.log("SERVERKEY: " +serverKey.toString('hex'));
+        else {
+            res.write(JSON.stringify({ success: true, data: data }))
+        }
+        res.end()
     })
-    /*crypto.pbkdf2(serverPsw, serverCode.toString(16), 100000, 16, 'sha512', (err, derivedKey) => {
-        if (err) { callback(err) }
-        else {
-            serverKey = derivedKey;
-            callback();
-        }
-        console.log("SERVERKEY: "+derivedKey.toString('hex'));  // '3745e48...08d59ae'
-    });*/
-}
-var createKeyFromPassphrase = (code,passphrase, callback) => {
-    const hash = crypto.createHash('md5');
-    hash.update(passphrase);
-    crypto.pbkdf2(hash.digest().toString('hex'), code.toString(16), 100000, 16, 'sha512', callback);
-}
+})
+app.get('/device', (req, res) => {
+    database.Device.find(req.query, (err, data) => {
+        res.setHeader('Content-Type', 'application/json')
+        if (err) {
+            res.write(JSON.stringify({ success: false, error: err }))
 
-var lookupPort = (callback) => {
-    SerialPort.list(function (err, ports) {
-        ports.forEach(function (portItem) {
-            if (portItem.manufacturer.includes("Arduino")) {
-                port = portItem
+        }
+        else {
+            res.write(JSON.stringify({ success: true, data: data }))
+        }
+        res.end()
+    })
+})
+app.put('/device', bodyParser.json(), (req, res) => {
+    async.waterfall(
+        [
+            (callback) => {
+                var id = req.body['_id']
+                delete req.body['_id']
+                database.Device.updateOne({ _id: id }, req.body, callback)
             }
-            console.log(portItem.comName);
-            console.log(portItem.pnpId);
-            console.log(portItem.manufacturer);
-        });
-        if (port) {
-            async.setImmediate(callback)
-        }
-        else {
-            async.setImmediate(callback,new Error("no fitting port found"))
-        }
-    });
-}
-var openSerial = (callback) => {
-    var options = {
-        baudRate: 57600,
-        dataBits:8,
-        stopBits:1,
-        parity: "none"
-    }
-    serialport = new SerialPort(
-        port.comName,
-        options,
-        callback
-    )
-}
-
-var processCommand = (code) => {
-    if (code.includes("getbufferlength")) {
-        serialport.write(cmdBuffer.length.toString())
-    }
-    else if (code.includes("getnext")) {
-        serialport.write(cmdBuffer[0])
-    }
-    else if (code.includes("radio_rx")) {
-        var hex = code.split(" ")[2]
-        var buf = new Buffer(hex, "hex")
-        console.log("to: " + buf.readInt8(0))
-        console.log("from: " + buf.readInt8(1))
-        var type = buf.readInt8(2)
-        console.log("type: " + type)
-        if (type == 2) {
-            console.log("Amps: " + buf.readFloatBE(3))
-        }
-
-    }
-    else if (code.includes("registertest")) {
-        var msg = code.split(" ")[1];
-        var devCode = msg.slice(2, 4)
-        var encryptedHex = msg.slice(4)
-        var encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
-        var aesCbc = new aesjs.ModeOfOperation.cbc(serverKey);
-        var decryptedBytes = Buffer.from(aesCbc.decrypt(encryptedBytes))
-        console.log(decryptedBytes.toString('hex'))
-        console.log("to: ", msg.slice(0, 2))
-        console.log("from: ", devCode)
-        console.log("type: ", decryptedBytes.readInt8(0))
-        console.log("passphrase: ", decryptedBytes.slice(1, 14).toString())
-        createKeyFromPassphrase(parseInt(devCode, 16), decryptedBytes.slice(1, 14).toString(), (err, key) => {
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
             if (err) {
-                console.log(err)
+                res.write(JSON.stringify({ success: false, error: err }))
             }
             else {
-                console.log("register "+devCode)
-                devices[devCode] = key
+                res.write(JSON.stringify({ success: true, data: data }))
             }
-        })
-        devices[msg.slice(2, 4)]
-    }
-    else if (code.includes("aestest")) {
-        var msg = code.split(" ")[1];
-        var devCode = msg.slice(2, 4)
-        if (devices[devCode]) {
-            var encryptedHex = msg.slice(4)
-            var encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
-            var aesCbc = new aesjs.ModeOfOperation.cbc(devices[devCode]);
-            var decryptedBytes = Buffer.from(aesCbc.decrypt(encryptedBytes))
-            console.log(decryptedBytes.toString('hex'))
-            console.log("to: ", msg.slice(0, 2))
-            console.log("from: ", devCode)
-            console.log("type: ", decryptedBytes.readInt8(0))
-            console.log("token: ", decryptedBytes.readInt16LE(1))
-            console.log("current: ", decryptedBytes.readFloatLE(3))
+            res.end()
         }
-        else {
-            console.log(devCode+" not registered")
-        }
-    }
-    else if (code.includes("BootCommand for 5s")) {
-        if (initMode) {
-            var passphrase = new Date().getTime().toString();
-            var generateDeviceKey = (callback) => {
-                createKeyFromPassphrase(deviceCode, passphrase,callback)
-            }
-            var createCommand = (deviceKey, callback) => {
-                var cmd = "init " + deviceCode.toString(16) + " " + deviceKey.toString('hex') + " " + serverKey.toString('hex') + " " + passphrase
-                console.log(cmd)
-                async.setImmediate(callback, null, cmd)
-            }
-            var sendCommand = (cmd, callback) => {
-                serialport.write(cmd)
-                async.setImmediate(callback)
-            }
-            async.waterfall(
-                [
-                    generateDeviceKey,
-                    createCommand,
-                    sendCommand
-                ],
-                (err) => {
-                    if (err) { console.log(err) }
-                    else { console.log("init success")}
-                }
-            )
-        }
-    }
-}
+    )
+})
 
-var addLineParser = (callback) => {
-    const parser = serialport.pipe(new Readline({ delimiter: '\r\n' }));
-    parser.on('data', (chunk) => {
-        console.log("->"+chunk)
-        processCommand(chunk)
-        
-    });
-    async.setImmediate(callback)
-}
 async.series(
     [
-        initServer,
-        lookupPort,
-        openSerial,
-        addLineParser
+        (callback) => {
+            database.init(callback)
+        },
+        (callback) => {
+            deviceControl.init(callback)
+        },
+        (callback) => {
+            app.listen(port, (err) => {
+                if (!err) {
+                    console.log('WebServer listening on port ' + port)
+                }
+                callback(err)
+            })
+        }
     ],
     (err) => {
         if (err) {
             console.log(err)
         }
-        else {
-            console.log("listening on port: "+port.comName)
-        }
     }
 )
-
