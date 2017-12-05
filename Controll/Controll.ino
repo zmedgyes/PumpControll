@@ -8,6 +8,22 @@
 #include <EEPROM.h>
 #include <AESLib.h>
 
+#define LED_PIN 13
+
+#define TRIAC_PIN 6
+
+#define HALL_PIN A0
+#define HALL_mVperAmp 66; //mV to A conversion factor to 30A Hall-module
+
+#define LORA_PIN_RX 10
+#define LORA_PIN_TX 11
+#define LORA_PIN_RST 12
+
+#define DEVICE_OBJECT_ADDRESS 0
+
+#define SERVER_ADDRESS 1
+#define BROADCAST_ADDRESS 0
+
 struct DeviceObject {
   byte id;
   byte deviceKey[16];
@@ -15,29 +31,26 @@ struct DeviceObject {
   char passphrase[13];
 };
 
-
-SoftwareSerial loraSerial(10, 11);
-
 String str;
 DeviceObject dev;
-int token =0;
-int devObjAddress = 0;
+int token = 0;
 String bootCmd = "";
 
-const int sensorIn = A0;
 const int measWindowSize = 1000;
-int mVperAmp = 66; // use 100 for 20A Module and 66 for 30A Module
-double Voltage = 0;
-double VRMS = 0;
-double AmpsRMS = 0;
+float AmpsRMS = 0;
+
+SoftwareSerial loraSerial(LORA_PIN_RX, LORA_PIN_TX);
 
 void setup() {
   //output LED pin
-  pinMode(13, OUTPUT);
+  led_init();
   led_off();
+
+  //triac
+  triac_init();
+  triac_off();
   
   // Open serial communications and wait for port to open:
-  
   Serial.begin(57600);
   Serial.println("connected");
   Serial.setTimeout(5000);
@@ -49,7 +62,7 @@ void setup() {
   else{
      if ( bootCmd.indexOf("setid") == 0 ){
       dev.id = HEXStringToByte(bootCmd.substring(6));
-      EEPROM.put(devObjAddress,dev.id);
+      EEPROM.put(DEVICE_OBJECT_ADDRESS,dev.id);
      }
      else if ( bootCmd.indexOf("init") == 0){
       dev.id = HEXStringToByte(bootCmd.substring(5,7));
@@ -61,30 +74,33 @@ void setup() {
       }
       //+1 a stringlezáró miatt
       bootCmd.substring(74,87).toCharArray(dev.passphrase,14);
-      EEPROM.put(devObjAddress, dev);
+      EEPROM.put(DEVICE_OBJECT_ADDRESS, dev);
      }
   }
-  EEPROM.get(devObjAddress,dev);
+  EEPROM.get(DEVICE_OBJECT_ADDRESS,dev);
+
+  //DEBUG
   Serial.println(byteToHEXString(dev.id));
   Serial.println(String(dev.passphrase));
+  //DEBUG
   
-    //Radio Reset
-  pinMode(12, OUTPUT);
-  digitalWrite(12, 0);
-  delay(100);
-  digitalWrite(12, 1);
-  delay(100);
+  //Radio reset
+  lora_reset();
+
+  //Radio start
   
   loraSerial.begin(9600);
   loraSerial.setTimeout(1000);
   lora_autobaud();
-  
+
+  //DEBUG
   led_on();
   delay(1000);
   led_off();
+  //DEBUG
 
+  //Radio setup
   Serial.println("Initing LoRa");
-  
   loraSerial.listen();
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
@@ -160,21 +176,31 @@ void setup() {
 
   //send register
   byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf)));
+  
+  //DEBUG
   String cmd = "registertest 01"+byteToHEXString(dev.id)+aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf));
   Serial.println(cmd);
+  //DEBUG
+  
   delay(1000);
 }
 
 void loop() {
-  
+  /*triac_on();
+  Serial.println("triac_on");
+  delay(5000);
+  triac_off();
+  Serial.println("triac_off");
+  delay(5000);*/
   //currentMeas
-  Voltage = getVPP(measWindowSize);
-  VRMS = (Voltage/2.0) *0.707; 
-  AmpsRMS = (VRMS * 1000)/mVperAmp;
+  AmpsRMS = getAmpsRMS();
   //Serial.println(floatToHEXString(AmpsRMS));
   //sendMessage(0,2,floatToHEXString(AmpsRMS));
   byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-  byte* pack = packCurrentData(0.5f,buf);
+  byte* pack = packCurrentData(AmpsRMS,buf);
+  
+  //DEBUG
   String ret ="";
   String key = "";
   for(int i =0; i<16; i++){
@@ -184,6 +210,10 @@ void loop() {
   Serial.println(ret);
   Serial.println(key);
   Serial.println("aestest 01"+byteToHEXString(dev.id)+aesEncriptAndToHexString(dev.deviceKey,pack));
+  //DEBUG
+
+  sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+  
   Serial.println("waiting for a message");
   loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
             
@@ -225,7 +255,13 @@ void lora_autobaud()
     response = loraSerial.readStringUntil('\n');
   }
 }
-
+ void lora_reset(){
+  pinMode(LORA_PIN_RST, OUTPUT);
+  digitalWrite(LORA_PIN_RST, LOW);
+  delay(100);
+  digitalWrite(LORA_PIN_RST, HIGH);
+  delay(100);
+ }
 /*
  * This function blocks until the word "ok\n" is received on the UART,
  * or until a timeout of 3*5 seconds.
@@ -239,37 +275,61 @@ int wait_for_ok()
   else return 0;
 }
 
+void led_init(){
+  pinMode(LED_PIN, OUTPUT);
+}
 void toggle_led()
 {
-  digitalWrite(13, !digitalRead(13));
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
 }
 
 void led_on()
 {
-  digitalWrite(13, 1);
+  digitalWrite(LED_PIN, HIGH);
 }
 
 void led_off()
 {
-  digitalWrite(13, 0);
+  digitalWrite(LED_PIN, LOW);
 }
+void triac_init(){
+  pinMode(TRIAC_PIN, OUTPUT);
+}
+void triac_on(){
+  digitalWrite(TRIAC_PIN, HIGH);
+}
+void triac_off(){
+  digitalWrite(TRIAC_PIN, LOW);
+}
+
 void processMsg(String msg){
   byte targetId = HEXStringToByte(msg.substring(0,2));
-  byte fromId = msg.substring(2,4).toInt();
-  int msgType = msg.substring(4,6).toInt();
-  String msgBody = msg.substring(6);
-  if(targetId == dev.id){
-    Serial.println("own cmd:"+msgBody);
-    //test toggle led
-    if(msgType == 1){
-      Serial.println("toggle led");
+  byte fromId = HEXStringToByte(msg.substring(2,4));
+  //broadcast message
+  byte message[16];
+  if(targetId == BROADCAST_ADDRESS){
+    aesDecryptAndToByteArray(dev.serverKey, msg.substring(4,36),message);
+    //hearthbeat
+    if(message[0] == 0){
+      token = *((int*)(&message[1]));
+    }
+  }
+  //own message
+  else if(targetId == dev.id){
+    aesDecryptAndToByteArray(dev.deviceKey, msg.substring(4,36),message);
+    //testled
+    if(message[0] == 1){
       toggle_led();
       delay(500);
       toggle_led();
+      delay(500);
+    }
+    //pump on/off
+    else if(message[0] ==2){
     }
   }
+  //foreign message
   else{
-    Serial.println("foreign cmd to:"+targetId);
   }
 }
 
@@ -413,7 +473,7 @@ float getVPP(int windowSize)
    uint32_t start_time = millis();
    while((millis()-start_time) < windowSize)
    {
-       readValue = analogRead(sensorIn);
+       readValue = analogRead(HALL_PIN);
        // see if you have a new maxValue
        if (readValue > maxValue) 
        {
@@ -431,3 +491,9 @@ float getVPP(int windowSize)
       
    return result;
  }
+ float getAmpsRMS(){
+    float Voltage = getVPP(measWindowSize);
+    float VRMS = (Voltage/2.0) *0.707; 
+    return (VRMS * 1000)/HALL_mVperAmp;
+ }
+
