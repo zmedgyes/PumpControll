@@ -9,7 +9,9 @@ Ext.define('PumpContolFront.Application', {
     name: 'PumpContolFront',
 
     stores: [
-        // TODO: add global / shared stores here
+        'Devices',
+        'Messages',
+        'Settings'
     ],
     
     launch: function () {
