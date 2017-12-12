@@ -10,7 +10,11 @@ var port = 3000
 app.use(express.static('public'))
 
 app.get('/message', (req, res) => {
-    database.Message.find(req.query, (err, data) => {
+    var where = {}
+    if (req.query.where) {
+        where = JSON.parse(req.query.where)
+    }
+    database.Message.find(where, (err, data) => {
         res.setHeader('Content-Type', 'application/json')
         if (err) {
             res.write(JSON.stringify({ success: false, error: err }))
@@ -23,7 +27,11 @@ app.get('/message', (req, res) => {
     })
 })
 app.get('/device', (req, res) => {
-    database.Device.find(req.query, (err, data) => {
+    var where = {}
+    if (req.query.where) {
+        where = JSON.parse(req.query.where)
+    }
+    database.Device.find(where, (err, data) => {
         res.setHeader('Content-Type', 'application/json')
         if (err) {
             res.write(JSON.stringify({ success: false, error: err }))
@@ -35,7 +43,7 @@ app.get('/device', (req, res) => {
         res.end()
     })
 })
-app.put('/device', bodyParser.json(), (req, res) => {
+app.put('/device/*', bodyParser.json(), (req, res) => {
     async.waterfall(
         [
             (callback) => {
@@ -56,6 +64,129 @@ app.put('/device', bodyParser.json(), (req, res) => {
         }
     )
 })
+app.delete('/device/*', bodyParser.json(), (req, res) => {
+    async.waterfall(
+        [
+            (callback) => {
+                var id = req.body['_id']
+                delete req.body['_id']
+                database.Device.remove({ _id: id }, callback)
+            }
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
+            if (err) {
+                res.write(JSON.stringify({ success: false, error: err }))
+            }
+            else {
+                res.write(JSON.stringify({ success: true, data: data }))
+            }
+            res.end()
+        }
+    )
+})
+app.get('/setting', (req, res) => {
+    var where = {}
+    if (req.query.where) {
+        where = JSON.parse(req.query.where)
+    }
+    database.Setting.find(where, (err, data) => {
+        res.setHeader('Content-Type', 'application/json')
+        if (err) {
+            res.write(JSON.stringify({ success: false, error: err }))
+
+        }
+        else {
+            res.write(JSON.stringify({ success: true, data: data }))
+        }
+        res.end()
+    })
+})
+app.post('/setting', bodyParser.json(), (req, res) => {
+    async.waterfall(
+        [
+            (callback) => {
+                delete req.body['_id']
+                var setting = new database.Setting(req.body) 
+                setting.save(callback)
+            }
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
+            if (err) {
+                res.write(JSON.stringify({ success: false, error: err }))
+            }
+            else {
+                res.write(JSON.stringify({ success: true, data: data }))
+            }
+            res.end()
+        }
+    )
+})
+app.put('/setting/*', bodyParser.json(), (req, res) => {
+    async.waterfall(
+        [
+            (callback) => {
+                var id = req.body['_id']
+                delete req.body['_id']
+                database.Setting.updateOne({ _id: id }, req.body, callback)
+            }
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
+            if (err) {
+                res.write(JSON.stringify({ success: false, error: err }))
+            }
+            else {
+                res.write(JSON.stringify({ success: true, data: data }))
+            }
+            res.end()
+        }
+    )
+})
+app.delete('/setting/*', bodyParser.json(), (req, res) => {
+    async.waterfall(
+        [
+            (callback) => {
+                var id = req.body['_id']
+                delete req.body['_id']
+                database.Setting.remove({ _id: id }, callback)
+            }
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
+            if (err) {
+                res.write(JSON.stringify({ success: false, error: err }))
+            }
+            else {
+                res.write(JSON.stringify({ success: true, data: data }))
+            }
+            res.end()
+        }
+    )
+})
+app.post('/bootloader', bodyParser.json(), (req, res) => {
+    /*async.waterfall(
+        [
+            (callback) => {
+                delete req.body['_id']
+                database.Setting.insertOne(req.body, callback)
+            }
+        ],
+        (err, data) => {
+            res.setHeader('Content-Type', 'application/json')
+            if (err) {
+                res.write(JSON.stringify({ success: false, error: err }))
+            }
+            else {
+                res.write(JSON.stringify({ success: true, data: data }))
+            }
+            res.end()
+        }
+    )*/
+    res.write(JSON.stringify({ success: false, error: "function not initiated" }))
+    res.end()
+})
 
 async.series(
     [
@@ -63,7 +194,10 @@ async.series(
             database.init(callback)
         },
         (callback) => {
-            deviceControl.init(callback)
+            deviceControl.init((err) => {
+                console.log(err)
+                callback()
+            })
         },
         (callback) => {
             app.listen(port, (err) => {

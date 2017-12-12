@@ -15,7 +15,9 @@ Ext.define('PumpContolFront.view.main.Main', {
 
         'PumpContolFront.view.main.MainController',
         'PumpContolFront.view.main.MainModel',
-        'PumpContolFront.view.main.SupervisorPanel'
+        'PumpContolFront.view.main.SupervisorPanel',
+        'PumpContolFront.view.main.SettingsPanel',
+        'PumpContolFront.view.main.BootloaderPanel'
     ],
 
     controller: 'main',
@@ -53,7 +55,8 @@ Ext.define('PumpContolFront.view.main.Main', {
             headerPosition: 'top'
         },
         wide: {
-            headerPosition: 'left'
+            //headerPosition: 'left'
+            headerPosition: 'top'
         }
     },
 
@@ -77,30 +80,28 @@ Ext.define('PumpContolFront.view.main.Main', {
     defaults: {
         layout:'fit'
     },
-    items: [{
-        title: 'Home',
-        iconCls: 'fa-home',
-        // The following grid shares a store with the classic version's grid as well!
-        items: [{
-            xtype: 'supervisorpanel'
-        }]
-    }, {
-        title: 'Users',
-        iconCls: 'fa-user',
-        bind: {
-            html: '{loremIpsum}'
+    items: [
+        {
+            title: 'Supervisor',
+            iconCls: 'fa-home',
+            items: [{
+                xtype: 'supervisorpanel'
+            }]
+        },
+
+        {
+            title: 'Settings',
+            iconCls: 'fa-cog',
+            items: [{
+                xtype: 'settingspanel'
+            }]
+        },
+        {
+            title: 'BootLoader',
+            iconCls: 'fa-user',
+            items: [{
+                xtype: 'bootloaderpanel'
+            }]
         }
-    }, {
-        title: 'Groups',
-        iconCls: 'fa-users',
-        bind: {
-            html: '{loremIpsum}'
-        }
-    }, {
-        title: 'Settings',
-        iconCls: 'fa-cog',
-        bind: {
-            html: '{loremIpsum}'
-        }
-    }]
+    ]
 });
