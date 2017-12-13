@@ -22,7 +22,24 @@
 #define DEVICE_OBJECT_ADDRESS 0
 
 #define SERVER_ADDRESS 1
+#define SERVER_REGISTRATION_ADDRESS 2
 #define BROADCAST_ADDRESS 0
+
+#define SEND_MSG_CODE_REG 0
+#define SEND_MSG_CODE_HB 1
+#define SEND_MSG_CODE_CUR 2
+#define SEND_MSG_CODE_ERR 0
+
+#define RECV_MSG_CODE_TOK 0
+#define RECV_MSG_CODE_LED 1
+#define RECV_MSG_CODE_TRI 2
+#define RECV_MSG_CODE_SET_MAXC 3
+#define RECV_MSG_CODE_SET_MINC 4
+
+#define ERROR_CODE_OVERCURRENT 0
+#define ERROR_CODE_UNDERCURRENT 1
+#define ERROR_CODE_FALSE_CURRENT 2
+#define ERROR_CODE_OTHER 3
 
 struct DeviceObject {
   byte id;
@@ -36,8 +53,16 @@ DeviceObject dev;
 int token = 0;
 String bootCmd = "";
 
-const int measWindowSize = 1000;
+const int measWindowSize = 100; //áram mintavételezési időablak [ms]
+int defaultLoRaWDT = 10000; //LoRa WatchDog Timeout [ms]
+int fastLoRaWDT = 1000; //LoRa WatchDog Timeout bekapsolt pumpa mellett[ms]
+float minWorkingCurrent = 2.0;
+float maxWorkingCurrent = 10.0;
 float AmpsRMS = 0;
+bool pumpOn = false;
+
+uint32_t lastHearthBeat = 0;
+uint32_t hearthBeatInterval = 10000;
 
 SoftwareSerial loraSerial(LORA_PIN_RX, LORA_PIN_TX);
 
@@ -163,6 +188,7 @@ void setup() {
   
   //loraSerial.println("radio set wdt 60000"); //disable for continuous reception
   loraSerial.println("radio set wdt 10000"); //disable for continuous reception
+  loraSerial.println("radio set wdt "+String(defaultLoRaWDT));
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
@@ -176,7 +202,7 @@ void setup() {
 
   //send register
   byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-  sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf)));
+  sendMessage(SERVER_REGISTRATION_ADDRESS,aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf)));
   
   //DEBUG
   String cmd = "registertest 01"+byteToHEXString(dev.id)+aesEncriptAndToHexString(dev.serverKey,packRegisterData(buf));
@@ -187,18 +213,45 @@ void setup() {
 }
 
 void loop() {
-  /*triac_on();
-  Serial.println("triac_on");
-  delay(5000);
-  triac_off();
-  Serial.println("triac_off");
-  delay(5000);*/
-  //currentMeas
-  AmpsRMS = getAmpsRMS();
-  //Serial.println(floatToHEXString(AmpsRMS));
-  //sendMessage(0,2,floatToHEXString(AmpsRMS));
   byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-  byte* pack = packCurrentData(AmpsRMS,buf);
+  byte* pack;
+  uint32_t currentTime = millis();
+
+  //HEARTHBEAT
+  //overflow (~50nap)
+  if(lastHearthBeat > currentTime){
+    lastHearthBeat = currentTime;
+    pack = packHearthBeat(buf);
+    sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+  }
+  else if((currentTime-lastHearthBeat) > hearthBeatInterval){
+    lastHearthBeat = currentTime;
+    pack = packHearthBeat(buf);
+    sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+  }
+  
+  //CURRENT AND PUMP ERROR
+  AmpsRMS = getAmpsRMS();
+  
+  if(pumpOn){
+    if(AmpsRMS > maxWorkingCurrent){
+      triac_off();
+      pack = packErrorMessage(ERROR_CODE_OVERCURRENT,buf);
+      sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+    }
+    else if(AmpsRMS < minWorkingCurrent){
+      pack = packErrorMessage(ERROR_CODE_UNDERCURRENT,buf);
+      sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+    }
+  }
+  else{
+    if(AmpsRMS > minWorkingCurrent){
+      pack = packErrorMessage(ERROR_CODE_FALSE_CURRENT,buf);
+      sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+    }
+  }
+  
+  pack = packCurrentData(AmpsRMS,buf);
   
   //DEBUG
   String ret ="";
@@ -213,7 +266,8 @@ void loop() {
   //DEBUG
 
   sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
-  
+
+  //WAIT FORM MESSAGE
   Serial.println("waiting for a message");
   loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
             
@@ -296,10 +350,22 @@ void triac_init(){
   pinMode(TRIAC_PIN, OUTPUT);
 }
 void triac_on(){
-  digitalWrite(TRIAC_PIN, HIGH);
+  loraSerial.println("radio set wdt "+String(fastLoRaWDT));
+  if(wait_for_ok()){
+    pumpOn = false;
+    digitalWrite(TRIAC_PIN, HIGH);
+  }
+  else{
+    byte buf[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    byte* pack = packErrorMessage(ERROR_CODE_OTHER,buf);
+    sendMessage(SERVER_ADDRESS,aesEncriptAndToHexString(dev.deviceKey,pack));
+  }
 }
 void triac_off(){
+  pumpOn = false;
   digitalWrite(TRIAC_PIN, LOW);
+  loraSerial.println("radio set wdt "+String(defaultLoRaWDT));
+  wait_for_ok();
 }
 
 void processMsg(String msg){
@@ -309,23 +375,43 @@ void processMsg(String msg){
   byte message[16];
   if(targetId == BROADCAST_ADDRESS){
     aesDecryptAndToByteArray(dev.serverKey, msg.substring(4,36),message);
-    //hearthbeat
-    if(message[0] == 0){
+    //server token
+    if(message[0] == RECV_MSG_CODE_TOK){
       token = *((int*)(&message[1]));
+    }
+    else if(message[0] == RECV_MSG_CODE_SET_MAXC){
+      maxWorkingCurrent = *((float*)(&message[1]));
+    }
+    else if(message[0] == RECV_MSG_CODE_SET_MINC){
+      minWorkingCurrent = *((float*)(&message[1]));
     }
   }
   //own message
   else if(targetId == dev.id){
     aesDecryptAndToByteArray(dev.deviceKey, msg.substring(4,36),message);
-    //testled
-    if(message[0] == 1){
-      toggle_led();
-      delay(500);
-      toggle_led();
-      delay(500);
+    //led on/off
+    if(message[0] == RECV_MSG_CODE_LED){
+      if(message[1]){
+        led_on();
+      }
+      else{
+        led_off();
+      }
     }
     //pump on/off
-    else if(message[0] ==2){
+    else if(message[0] == RECV_MSG_CODE_TRI){
+      if(message[1]){
+        led_on();
+      }
+      else{
+        led_off();
+      }
+    }
+    else if(message[0] == RECV_MSG_CODE_SET_MAXC){
+      maxWorkingCurrent = *((float*)(&message[1]));
+    }
+    else if(message[0] == RECV_MSG_CODE_SET_MINC){
+      minWorkingCurrent = *((float*)(&message[1]));
     }
   }
   //foreign message
@@ -351,24 +437,29 @@ byte* aesDecryptAndToByteArray(byte* key, String data,byte* ret){
 }
 
 byte* packRegisterData(byte* ret){
-  ret[0] = 0;
+  ret[0] = SEND_MSG_CODE_REG;
   for(int i = 0; i < 13; i++){
     ret[i+1] = dev.passphrase[i];
   }
   return ret;
 }
 byte* packHearthBeat(byte* ret){
-  ret[0] = 1;
+  ret[0] = SEND_MSG_CODE_HB;
    *((int *) &(ret[1])) = token;
   return ret;
 }
 byte* packCurrentData(float data, byte* ret){
-  ret[0] = 2;
+  ret[0] = SEND_MSG_CODE_CUR;
   *((int *) &(ret[1])) = token;
   *((float *) &(ret[3])) = data;
   return ret;
 }
-
+byte* packErrorMessage(byte code, byte* ret){
+  ret[0] = SEND_MSG_CODE_ERR;
+  *((int *) &(ret[1])) = token;
+  ret[3]=code;
+  return ret;
+}
 String byteToHEXString(byte b){
   int upper = (int)((b & 0xF0) >> 4);
   int lower = (int)(b & 0x0F);

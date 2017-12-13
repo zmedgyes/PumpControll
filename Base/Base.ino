@@ -12,6 +12,7 @@ String inCmd;
 String msgBody;
 int i=0;
 int buffLen = 0;
+int waitPeriod = 1000;
 
 void setup() {
   //output LED pin
@@ -99,8 +100,10 @@ void setup() {
   loraSerial.println("radio set cr 4/5");
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
-  
-  loraSerial.println("radio set wdt 60000"); //disable for continuous reception
+
+  //disable for continuous reception
+  //loraSerial.println("radio set wdt 60000"); 
+  loraSerial.println("radio set wdt "+String(waitPeriod)); 
   str = loraSerial.readStringUntil('\n');
   Serial.println(str);
   
@@ -126,7 +129,7 @@ void loop() {
     Serial.println("cmd: "+inCmd);
    }
    Serial.println("waiting for a message");
-  loraSerial.println("radio rx 0"); //wait for 60 seconds to receive
+   loraSerial.println("radio rx 0");
   
   str = loraSerial.readStringUntil('\n');
   if ( str.indexOf("ok") == 0 )
@@ -139,8 +142,6 @@ void loop() {
     if ( str.indexOf("radio_rx") == 0 )
     {
       Serial.println(str);
-      //processMsg(str.substring(10));
-      //toggle_led();
     }
     else
     {
