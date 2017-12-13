@@ -7,6 +7,9 @@ var bodyParser = require('body-parser');
 var app = express()
 var port = 3000
 
+var sendTokenInterval;
+var refreshActiveInterval;
+
 app.use(express.static('public'))
 
 app.get('/message', (req, res) => {
@@ -46,6 +49,29 @@ app.get('/device', (req, res) => {
 app.put('/device/*', bodyParser.json(), (req, res) => {
     async.waterfall(
         [
+            (callback) => {
+                if (req.body.hasOwnProperty('PumpActive')) {
+                    database.Device.findOne({ _id: req.body._id }, (err, result) => {
+                        if (err) { callback(err) }
+                        else {
+                            if (result) {
+                                if (req.body.PumpActive) {
+                                    deviceControl.turnOnPump(result)
+                                }
+                                else {
+                                    deviceControl.turnOffPump(result)
+                                }
+                                callback()
+                            }
+                            else { callback(new Error("missing device"))}
+                        }
+                    })
+
+                }
+                else {
+                    async.setImmediate(callback)
+                }              
+            },
             (callback) => {
                 var id = req.body['_id']
                 delete req.body['_id']
@@ -166,26 +192,12 @@ app.delete('/setting/*', bodyParser.json(), (req, res) => {
     )
 })
 app.post('/bootloader', bodyParser.json(), (req, res) => {
-    /*async.waterfall(
-        [
-            (callback) => {
-                delete req.body['_id']
-                database.Setting.insertOne(req.body, callback)
-            }
-        ],
-        (err, data) => {
-            res.setHeader('Content-Type', 'application/json')
-            if (err) {
-                res.write(JSON.stringify({ success: false, error: err }))
-            }
-            else {
-                res.write(JSON.stringify({ success: true, data: data }))
-            }
-            res.end()
-        }
-    )*/
-    res.write(JSON.stringify({ success: false, error: "function not initiated" }))
-    res.end()
+    res.setHeader('Content-Type', 'application/json')
+    deviceControl.deviceInit(req.body.DeviceId, (err) => {
+        res.write(JSON.stringify({ success: true }))
+        res.end()
+    })
+    
 })
 
 async.series(
@@ -206,7 +218,22 @@ async.series(
                 }
                 callback(err)
             })
+        },
+        (callback) => {
+            //10 perc
+            sendTokenInterval = setInterval(function () {
+                deviceControl.sendToken()
+            }, 10 * 60 * 1000)
+
+            //60 perc
+            refreshActiveInterval = setInterval(function () {
+                deviceControl.checkActiveDevices((err) => {
+                    if (err) { console.log(err)}
+                })
+            }, 60 * 60 * 1000)
+            async.setImmediate(callback)
         }
+        
     ],
     (err) => {
         if (err) {

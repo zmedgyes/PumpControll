@@ -14,7 +14,7 @@
             reference: 'devId',
             fieldLabel: 'DeviceId',
             maxValue: 255,
-            minValue: 2
+            minValue: 3
         },
         {
             xtype: 'button',
