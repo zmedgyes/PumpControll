@@ -12,7 +12,7 @@ String inCmd;
 String msgBody;
 int i=0;
 int buffLen = 0;
-int waitPeriod = 1000;
+int waitPeriod = 10000;
 
 void setup() {
   //output LED pin
