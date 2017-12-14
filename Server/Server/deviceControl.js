@@ -7,7 +7,7 @@ var database = require('./database.js');
 
 var port;
 var serialport;
-var cmdBuffer = ["send 060001"]
+var cmdBuffer = []
 
 
 var serverPsw = "server";
@@ -111,7 +111,7 @@ var processSerial = (code) => {
         serialport.write(cmdBuffer.length.toString())
     }
     else if (code.includes("getnext")) {
-        serialport.write(cmdBuffer[0])
+        serialport.write(cmdBuffer.pop())
     }
     else if (code.includes("radio_rx")) {
         var hex = code.split(" ")[2]
@@ -143,6 +143,7 @@ var processSerial = (code) => {
             }
             //register
             else if (receiver == 2) {
+                console.log("REGISTER"+sender)
                 async.setImmediate(callback, null, serverKey)
             }
             else {
@@ -159,14 +160,13 @@ var processSerial = (code) => {
             //register
             if (type == 0) {
                 var passphrase = data.slice(1, 14).toString()
-                createKeyFromPassphrase(sender, passpharse, (err, key) => {
+                createKeyFromPassphrase(sender, passphrase, (err, key) => {
                     if (err) {
                         callback(err)
                     }
                     else {
-                        database.Device.findOne({ DeviceId: devCode }, (err, result) => {
+                        database.Device.findOne({ DeviceId: sender }, (err, result) => {
                             if (!result) {
-                                devices[devCode] = key
                                 var device = new database.Device()
                                 device['DeviceId'] = sender;
                                 device['DeviceKey'] = key.toString('hex')
@@ -174,9 +174,13 @@ var processSerial = (code) => {
                                 device['PumpActive'] = false;
                                 device['Lat'] = defaultLat;
                                 device['Lng'] = defaultLng;
-                                device.save((err) => { callback(err) });
+                                device.save((err) => {
+                                    sendToken()
+                                    callback(err)
+                                });
                             }
                             else {
+                                sendToken()
                                 callback()
                             }
                         })
@@ -332,7 +336,7 @@ var processSerial = (code) => {
                 }
             }
             else {
-                console.log("unknown message type")
+                console.log("unknown message type: "+type)
                 async.setImmediate(callback)
             }
         }
@@ -422,7 +426,8 @@ var processSerial = (code) => {
                 createKeyFromPassphrase(deviceCode, passphrase, callback)
             }
             var createCommand = (deviceKey, callback) => {
-                var cmd = "init " + deviceCode.toString(16) + " " + deviceKey.toString('hex') + " " + serverKey.toString('hex') + " " + passphrase
+                var devCodeHex = (deviceCode < 16) ? ("0" + deviceCode.toString(16)) : deviceCode.toString(16);
+                var cmd = "init " + devCodeHex + " " + deviceKey.toString('hex') + " " + serverKey.toString('hex') + " " + passphrase
                 console.log(cmd)
                 async.setImmediate(callback, null, cmd)
             }
@@ -623,7 +628,7 @@ var checkActiveDevices = (callback) => {
 }
 
 var checkValidToken = function (token) {
-    var limit = Math.round(new Date.getTime() / 1000) - 60 * 60 //elmúlt 1 óra
+    var limit = Math.round(new Date().getTime() / 1000) - 60 * 60 //elmúlt 1 óra
     return (token > limit);
 }
 
